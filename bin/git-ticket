@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+require 'rubygems'
+require 'nokogiri'
+require 'readline'
+
+trap('INT') { abort "Exiting..."}
+
+URL = "http://projects.reductivelabs.com/issues/%d.xml"
+
+# Flags
+help        = ARGV.delete('--help')        || ARGV.delete('-h') || ARGV.empty?
+branch      = ARGV.delete('--branch')      || ARGV.delete('-b')
+interactive = ARGV.delete('--interactive') || ARGV.delete('-i')
+delete      = ARGV.delete('--delete')      || ARGV.delete('-d')
+list        = ARGV.delete('--list')        || ARGV.delete('-l')
+
+if help
+  puts <<USAGE
+Usage: git-ticket [OPTION] TICKET
+
+Checkout, create, delete or list ticket branches.
+
+Based on the git workflow described in
+  http://reinh.com/blog/2009/03/02/a-git-workflow-for-agile-teams.html
+
+NOTE: Currently designed to work with Redmine only.
+
+Synopsis:
+  git ticket <ticket>
+  git ticket [-i, --interactive] (-b, --branch) <ticket>
+  git ticket (-d, --delete) <ticket>
+  git ticket (-l, --list)
+
+Options:
+  -i, --interactive    Interactive mode.
+  -b, --branch         Create a new ticket branch.
+  -d, --delete         Delete a ticket branch.
+  -l, --list           List all ticket branches.
+  -h, --help           You're reading it.
+USAGE
+
+  exit 0
+end
+
+if list
+  branches = `git branch`.gsub(/^\*?\s+/,'').split(/\n/).grep(/^(?:bug\-)?\d+\-/)
+  puts branches.empty? ? "No ticket branches" : branches
+  exit 0
+end
+
+id  = ARGV.grep(/^\d+$/).first.to_i
+
+if branch
+  doc = Nokogiri::XML(`curl -s #{URL % id}`)
+
+  type = doc.search('issue tracker').first['name'].downcase
+  title = doc.search('issue subject').first.text.gsub(/\s+/, '-')
+
+  branch_name_root = "#{'bug-' if type=="bug"}#{id}-"
+  branch_name = "#{branch_name_root}#{title}".downcase
+  def branch_name.too_long?; length > 50 end
+
+
+  if interactive || branch_name.too_long?
+    puts "Branch name: #{branch_name}"
+    new_branch_name = Readline.readline "New branch name: #{branch_name_root}"
+    branch_name = branch_name_root + new_branch_name unless new_branch_name.empty?
+  end
+
+  `git checkout -b #{branch_name}`
+  exit 0
+end
+
+existing_branch = `git branch`.gsub(/^\*?\s+/,'').split(/\n/).grep(/^(?:bug\-)?#{id}\-/)
+
+if existing_branch.empty?
+  puts "No such ticket branch"
+  exit 0
+end
+
+if delete
+  puts `git branch -d #{existing_branch}`
+  exit 0
+end
+
+`git checkout #{existing_branch}`
