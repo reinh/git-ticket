@@ -19,5 +19,3 @@ rdoc
 pkg
 
 ## PROJECT::SPECIFIC
-# Because I'm right and Yehuda is wrong.
-*.gemspec
