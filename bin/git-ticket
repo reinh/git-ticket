@@ -1,22 +1,41 @@
-#!/usr/bin/env ruby
-require 'rubygems'
+#!/usr/bin/env ruby -rubygems
 require 'nokogiri'
 require 'readline'
+require 'commandant'
 
-trap('INT') { abort "Exiting..."}
+include Commandant
 
 URL = "http://projects.reductivelabs.com/issues/%d.xml"
 
-# Flags
-help        = ARGV.delete('--help')        || ARGV.delete('-h') || ARGV.empty?
-branch      = ARGV.delete('--branch')      || ARGV.delete('-b')
-interactive = ARGV.delete('--interactive') || ARGV.delete('-i')
-delete      = ARGV.delete('--delete')      || ARGV.delete('-d')
-list        = ARGV.delete('--list')        || ARGV.delete('-l')
+trap('INT') { abort "Exiting..."}
 
-if help
+def parse_args(args)
+  # Flags
+  $help        = args.delete('--help')        || args.delete('-h') || args.empty?
+  $branch      = args.delete('--branch')      || args.delete('-b')
+  $interactive = args.delete('--interactive') || args.delete('-i')
+  $delete      = args.delete('--delete')      || args.delete('-d')
+  $list        = args.delete('--list')        || args.delete('-l')
+
+  $id  = args.grep(/^\d+$/).first && args.grep(/^\d+$/).first.to_i
+end
+
+def existing_branch
+  `git branch`.gsub(/^\*?\s+/,'').split(/\n/).grep(/^(?:bug\-)?#{$id}\-/)
+end
+
+def assert_id_provided
+  abort "Error: ticket number required" unless $id
+end
+
+def assert_branch_exists
+  assert_id_provided
+  abort "Error: no ticket branch for #$id" if existing_branch.empty?
+end
+
+command :help do
   puts <<USAGE
-Usage: git-ticket [OPTION] TICKET
+Usage: git-ticket [COMMAND] [OPTIONS] [TICKET]
 
 Checkout, create, delete or list ticket branches.
 
@@ -30,6 +49,16 @@ Synopsis:
   git ticket [-i, --interactive] (-b, --branch) <ticket>
   git ticket (-d, --delete) <ticket>
   git ticket (-l, --list)
+  git ticket list
+  git ticket branch [-i, --interactive] <ticket>
+  git ticket delete <ticket>
+  git ticket checkout <ticket>
+
+Aliases:
+  br => branch
+  co => checkout
+  ls => list
+  rm => delete
 
 Options:
   -i, --interactive    Interactive mode.
@@ -42,26 +71,31 @@ USAGE
   exit 0
 end
 
-if list
+command :list do
   branches = `git branch`.gsub(/^\*?\s+/,'').split(/\n/).grep(/^(?:bug\-)?\d+\-/)
   puts branches.empty? ? "No ticket branches" : branches
   exit 0
 end
 
-id  = ARGV.grep(/^\d+$/).first.to_i
+command :branch do |args|
+  parse_args(args)
+  assert_id_provided
 
-if branch
-  doc = Nokogiri::XML(`curl -s #{URL % id}`)
+  doc = Nokogiri::XML(`curl -s #{URL % $id}`)
 
-  type = doc.search('issue tracker').first['name'].downcase
+  ticket = doc.search('issue tracker').first
+
+  abort "Error: no such ticket #$id" unless ticket
+
+  type = ticket['name'].downcase
   title = doc.search('issue subject').first.text.gsub(/\s+/, '-')
 
-  branch_name_root = "#{'bug-' if type=="bug"}#{id}-"
+  branch_name_root = "#{'bug-' if type=="bug"}#{$id}-"
   branch_name = "#{branch_name_root}#{title}".downcase
   def branch_name.too_long?; length > 50 end
 
 
-  if interactive || branch_name.too_long?
+  if $interactive || branch_name.too_long?
     puts "Branch name: #{branch_name}"
     new_branch_name = Readline.readline "New branch name: #{branch_name_root}"
     branch_name = branch_name_root + new_branch_name unless new_branch_name.empty?
@@ -71,16 +105,35 @@ if branch
   exit 0
 end
 
-existing_branch = `git branch`.gsub(/^\*?\s+/,'').split(/\n/).grep(/^(?:bug\-)?#{id}\-/)
+command :delete do |args|
+  parse_args(args)
+  assert_branch_exists
 
-if existing_branch.empty?
-  puts "No such ticket branch"
-  exit 0
-end
-
-if delete
   puts `git branch -d #{existing_branch}`
   exit 0
 end
 
-`git checkout #{existing_branch}`
+command :checkout do |args|
+  parse_args(args)
+  assert_branch_exists
+
+  `git checkout #{existing_branch}`
+end
+
+command :main do |args|
+  parse_args(args)
+
+  Commandant.run(:help)   if $help
+  Commandant.run(:branch) if $branch
+  Commandant.run(:list)   if $list
+  Commandant.run(:delete) if $delete
+
+  puts "Error: Unknown command #{args.first}"
+  puts "Available commands: #{Commandant::COMMANDS.keys.sort_by{|k| k.to_s} * ', '}"
+  puts
+  Commandant.run(:help)
+end
+
+add_alias :br => :branch, :co => :checkout, :ls => :list, :rm => :delete
+
+run

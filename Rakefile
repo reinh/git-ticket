@@ -10,6 +10,7 @@ begin
     gem.email = "reinh@reinh.com"
     gem.homepage = "http://github.com/reinh/git-ticket"
     gem.authors = ["Rein Henrichs"]
+    gem.add_dependency 'commandant'
   end
   Jeweler::GemcutterTasks.new
 rescue LoadError
